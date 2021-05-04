@@ -4,12 +4,5 @@ Line three
 Line four
 Line five
 Line six
-
-SubLine one
-SubLine two
-SubLine three
-SubLine four
-SubLine five
-SubLine six
-SubLine seven
-SubLine eight
+Line seven
+Line eight
