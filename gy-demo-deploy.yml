@@ -1,0 +1,149 @@
+trigger:
+  enabled: false
+variables:
+- name: solution
+  value: '**/*.sln'
+- name: buildPlatform
+  value: 'Any CPU'
+- name: buildConfiguration
+  value: 'Release'
+stages:
+- stage: __default
+  jobs:
+  - job: build
+    pool:
+      name: Default
+    steps:
+    - task: UseDotNet@2
+      displayName: Install dotnet core sdk
+      inputs:
+        version: '6.0.x'
+        packageType: 'sdk'
+    - task: DotNetCoreCLI@2
+      displayName: "Publish and zip $(solution)"
+      enabled: true
+      inputs:
+        command: publish
+        publishWebProjects: True
+        arguments: '--configuration $(BuildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+        zipAfterPublish: True
+    - task: DotNetCoreCLI@2
+      displayName: Install dotnet-ef
+      enabled: false
+      inputs:
+        command: custom
+        custom: 'tool'
+        arguments: 'install --global dotnet-ef'
+      continueOnError: true
+    - task: DotNetCoreCLI@2
+      displayName: 'dotnet ef migrations script -c PortalContext'
+      enabled: true
+      inputs:
+        command: custom
+        custom: 'ef'
+        arguments: migrations script -p $(Build.SourcesDirectory)\ShareKnowledge.Upskill\ShareKnowledge.Upskill.Portal\ShareKnowledge.Upskill.Portal.csproj --output $(Build.ArtifactStagingDirectory)\upskill.database.portal.sql -c PortalContext
+    - task: DotNetCoreCLI@2
+      displayName: 'dotnet ef migrations script -c LearningContext'
+      enabled: true
+      inputs:
+        command: custom
+        custom: 'ef'
+        arguments: migrations script -p $(Build.SourcesDirectory)\ShareKnowledge.Upskill\ShareKnowledge.Upskill.Portal\ShareKnowledge.Upskill.Portal.csproj --output $(Build.ArtifactStagingDirectory)\upskill.database.learning.sql -c LearningContext
+    - task: AzureRmWebAppDeployment@4
+      displayName: Azure App Service deploy
+      enabled: true
+      inputs:
+        ConnectionType: 'AzureRM'
+        azureSubscription: 'EPM-UPSK(76b694c8-ae27-40fb-ac27-1a6426e7967b)'
+        appType: 'webAppLinux'
+        WebAppName: 'upskill-demo'
+        packageForLinux: '$(Build.ArtifactStagingDirectory)/**/*.zip'
+    - task: AzureCLI@2
+      displayName: 'az sql db delete'
+      enabled: true
+      inputs:
+        azureSubscription: 'EPM-UPSK(76b694c8-ae27-40fb-ac27-1a6426e7967b)'
+        scriptType: 'ps'
+        scriptLocation: 'inlineScript'
+        inlineScript: 'az sql db delete -g UpskillDemoResourceGroup -s upskilldemosql -n upskill --yes -y'
+    - task: AzureCLI@2
+      displayName: 'az sql db create'
+      enabled: true
+      inputs:
+        azureSubscription: 'EPM-UPSK(76b694c8-ae27-40fb-ac27-1a6426e7967b)'
+        scriptType: 'ps'
+        scriptLocation: 'inlineScript'
+        inlineScript: 'az sql db create -g UpskillDemoResourceGroup -s upskilldemosql -n upskill --edition GeneralPurpose --min-capacity 0.5 --capacity 2 --family Gen5 --compute-model Serverless --max-size 2GB --auto-pause-delay 60'
+    - task: SqlAzureDacpacDeployment@1
+      displayName: Deploy LearningComponents.CommonDB.dacpac
+      enabled: true
+      inputs:
+        azureSubscription: 'EPM-UPSK(76b694c8-ae27-40fb-ac27-1a6426e7967b)'
+        AuthenticationType: 'connectionString'
+        ConnectionString: '$(upskill-connectionstring)'
+        deployType: 'DacpacTask'
+        DeploymentAction: 'Publish'
+        DacpacFile: '$(Build.SourcesDirectory)\ShareKnowledge.Upskill\LearningComponents.CommonDB.dacpac'
+        IpDetectionMethod: 'AutoDetect'
+    - task: SqlAzureDacpacDeployment@1
+      displayName: Deploy LearningComponents.ReviewDB.dacpac
+      enabled: true
+      inputs:
+        azureSubscription: 'EPM-UPSK(76b694c8-ae27-40fb-ac27-1a6426e7967b)'
+        AuthenticationType: 'connectionString'
+        ConnectionString: '$(upskill-connectionstring)'
+        deployType: 'DacpacTask'
+        DeploymentAction: 'Publish'
+        DacpacFile: '$(Build.SourcesDirectory)\ShareKnowledge.Upskill\LearningComponents.ReviewDB.dacpac'
+        IpDetectionMethod: 'AutoDetect'
+    - task: SqlAzureDacpacDeployment@1
+      displayName: Deploy LearningComponents.ExecuteDB.dacpac
+      enabled: true
+      inputs:
+        azureSubscription: 'EPM-UPSK(76b694c8-ae27-40fb-ac27-1a6426e7967b)'
+        AuthenticationType: 'connectionString'
+        ConnectionString: '$(upskill-connectionstring)'
+        deployType: 'DacpacTask'
+        DeploymentAction: 'Publish'
+        DacpacFile: '$(Build.SourcesDirectory)\ShareKnowledge.Upskill\LearningComponents.ExecuteDB.dacpac'
+        IpDetectionMethod: 'AutoDetect'
+    - task: PowerShell@2
+      displayName: 'Install-Module -Name SqlServer'
+      inputs:
+        targetType: 'inline'
+        script: 'Install-Module -Name SqlServer'
+        errorActionPreference: silentlyContinue
+    - task: SqlAzureDacpacDeployment@1
+      displayName: 'Deploy upskill.database.portal.sql'
+      inputs:
+        azureSubscription: 'EPM-UPSK(76b694c8-ae27-40fb-ac27-1a6426e7967b)'
+        AuthenticationType: 'connectionString'
+        ConnectionString: '$(upskill-connectionstring)'
+        deployType: 'SqlTask'
+        SqlFile: '$(Build.ArtifactStagingDirectory)\upskill.database.portal.sql'
+        IpDetectionMethod: 'AutoDetect'
+    - task: SqlAzureDacpacDeployment@1
+      displayName: 'Deploy upskill.database.learning.sql'
+      inputs:
+        azureSubscription: 'EPM-UPSK(76b694c8-ae27-40fb-ac27-1a6426e7967b)'
+        AuthenticationType: 'connectionString'
+        ConnectionString: '$(upskill-connectionstring)'
+        deployType: 'SqlTask'
+        SqlFile: '$(Build.ArtifactStagingDirectory)\upskill.database.learning.sql'
+        IpDetectionMethod: 'AutoDetect'
+    - task: SqlAzureDacpacDeployment@1
+      displayName: 'Execute CreateAdmin.sql'
+      inputs:
+        azureSubscription: 'EPM-UPSK(76b694c8-ae27-40fb-ac27-1a6426e7967b)'
+        AuthenticationType: 'connectionString'
+        ConnectionString: '$(upskill-connectionstring)'
+        deployType: 'SqlTask'
+        SqlFile: '$(Build.SourcesDirectory)\Scripts\CreateAdmin.sql'
+        IpDetectionMethod: 'AutoDetect'
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish build artifacts'
+      enabled: false
+      inputs:
+        pathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        artifactName: '_upskill'
+
